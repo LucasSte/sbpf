@@ -72,7 +72,7 @@ macro_rules! bench_gapped_randomized_access_with_1024_entries {
                         false,
                     )];
                     let config = Config::default();
-                    let memory_mapping =
+                    let mut memory_mapping =
                         $mem::new(memory_regions, &config, SBPFVersion::V4).unwrap();
                     let mut prng = new_prng!();
                     bencher.iter(|| {
@@ -303,7 +303,7 @@ fn do_bench_mapping_operation(bencher: &mut Bencher, op: MemoryOperation) {
             MemoryRegion::new_writable(&mut mem2, vm_addr + 8),
         ],
         &config,
-        SBPFVersion::V4,
+        SBPFVersion::V3,
     )
     .unwrap();
 

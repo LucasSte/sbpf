@@ -1398,11 +1398,11 @@ mod test {
             ..Config::default()
         };
 
-        let mapping = MemoryMapping::new_with_cow(
+        let mapping = MemoryMapping::new_with_access_violation_handler(
             vec![MemoryRegion::new_readonly(&[11, 12], ebpf::MM_RODATA_START)],
             &config,
             SBPFVersion::V4,
-            Box::new(|_| Err(())),
+            Box::new(|_, _, _, _, _| ()),
         )
         .unwrap();
 
