@@ -256,7 +256,7 @@ pub enum RuntimeEnvironmentSlot {
 ///         ebpf::MM_STACK_START,
 ///     ),
 ///     MemoryRegion::new_writable(heap.as_slice_mut(), ebpf::MM_HEAP_START),
-///     MemoryRegion::new_writable(mem, ebpf::MM_INPUT_START),
+///     MemoryRegion::new_writable(mem, ebpf::MM_TX_AREA),
 /// ];
 ///
 /// let memory_mapping = MemoryMapping::new(regions, executable.get_config(), sbpf_version).unwrap();

@@ -262,7 +262,7 @@ macro_rules! create_vm {
             memory_mapping,
             stack_len,
         );
-        $vm_name.registers[1] = solana_sbpf::ebpf::MM_INPUT_START;
+        $vm_name.registers[1] = solana_sbpf::ebpf::MM_TX_AREA;
     };
 }
 
@@ -286,7 +286,7 @@ macro_rules! test_interpreter_and_jit {
         $executable.verify::<RequisiteVerifier>().unwrap();
         let (instruction_count_interpreter, result_interpreter, interpreter_final_pc, _tracer_interpreter) = {
             let mut mem = $mem;
-            let mem_region = MemoryRegion::new_writable(&mut mem, ebpf::MM_INPUT_START);
+            let mem_region = MemoryRegion::new_writable(&mut mem, ebpf::MM_TX_AREA);
             let mut context_object = context_object.clone();
             create_vm!(
                 vm,
@@ -297,7 +297,7 @@ macro_rules! test_interpreter_and_jit {
                 vec![mem_region],
                 None
             );
-            vm.registers[1] = ebpf::MM_INPUT_START;
+            vm.registers[1] = ebpf::MM_TX_AREA;
             let (instruction_count_interpreter, result_interpreter) = vm.execute_program(&$executable, true);
             (
                 instruction_count_interpreter,
@@ -311,7 +311,7 @@ macro_rules! test_interpreter_and_jit {
             #[allow(unused_mut)]
             let compilation_result = $executable.jit_compile();
             let mut mem = $mem;
-            let mem_region = MemoryRegion::new_writable(&mut mem, ebpf::MM_INPUT_START);
+            let mem_region = MemoryRegion::new_writable(&mut mem, ebpf::MM_TX_AREA);
             create_vm!(
                 vm,
                 &$executable,
@@ -324,7 +324,7 @@ macro_rules! test_interpreter_and_jit {
             match compilation_result {
                 Err(_) => panic!("{:?}", compilation_result),
                 Ok(()) => {
-                    vm.registers[1] = ebpf::MM_INPUT_START;
+                    vm.registers[1] = ebpf::MM_TX_AREA;
                     let (instruction_count_jit, result_jit) = vm.execute_program(&$executable, false);
                     let tracer_jit = &vm.context_object_pointer;
                     let mut diverged = false;
@@ -434,7 +434,7 @@ macro_rules! test_syscall_asm {
             enable_instruction_tracing: true,
             ..Config::default()
         };
-        for sbpf_version in [SBPFVersion::V0, SBPFVersion::V3] {
+        for sbpf_version in [SBPFVersion::V0, SBPFVersion::V4] {
             config.enabled_sbpf_versions = sbpf_version..=sbpf_version;
             let mut loader = BuiltinProgram::new_loader(config.clone());
             $(test_syscall_asm!(register, loader, $syscall_name => $syscall_function);)*
