@@ -178,12 +178,12 @@ fn check_registers(
     insn_ptr: usize,
     sbpf_version: SBPFVersion,
 ) -> Result<(), VerifierError> {
-    if insn.src > 10 {
+    if insn.src > 15 {
         return Err(VerifierError::InvalidSourceRegister(insn_ptr));
     }
 
     match (insn.dst, store) {
-        (0..=9, _) | (10, true) => Ok(()),
+        (0..=9, _) | (10, true) | (11..16, _) => Ok(()),
         (10, false) if sbpf_version.dynamic_stack_frames() && insn.opc == ebpf::ADD64_IMM => Ok(()),
         (10, false) => Err(VerifierError::CannotWriteR10(insn_ptr)),
         (_, _) => Err(VerifierError::InvalidDestinationRegister(insn_ptr)),
@@ -212,7 +212,7 @@ fn check_callx_register(
     } else {
         insn.imm
     };
-    if !(0..10).contains(&reg) {
+    if !(0..16).contains(&reg) {
         return Err(VerifierError::InvalidRegister(insn_ptr));
     }
     Ok(())

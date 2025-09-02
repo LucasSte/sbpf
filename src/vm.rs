@@ -184,7 +184,7 @@ impl DynamicAnalysis {
 #[derive(Clone, Default)]
 pub struct CallFrame {
     /// The caller saved registers
-    pub caller_saved_registers: [u64; ebpf::SCRATCH_REGS],
+    pub caller_saved_registers: [u64; 10],
     /// The callers frame pointer
     pub frame_pointer: u64,
     /// The target_pc of the exit instruction which returns back to the caller
@@ -288,7 +288,7 @@ pub struct EbpfVm<'a, C: ContextObject> {
     /// Number of times the stop watch was used
     pub stopwatch_denominator: u64,
     /// Registers inlined
-    pub registers: [u64; 12],
+    pub registers: [u64; 17],
     /// ProgramResult inlined
     pub program_result: ProgramResult,
     /// MemoryMapping inlined
@@ -312,7 +312,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         stack_len: usize,
     ) -> Self {
         let config = loader.get_config();
-        let mut registers = [0u64; 12];
+        let mut registers = [0u64; 17];
         registers[ebpf::FRAME_PTR_REG] =
             ebpf::MM_STACK_START.saturating_add(if sbpf_version.dynamic_stack_frames() {
                 // the stack is fully descending, frames start as empty and change size anytime r11 is modified
@@ -351,7 +351,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         interpreted: bool,
     ) -> (u64, ProgramResult) {
         debug_assert!(Arc::ptr_eq(&self.loader, executable.get_loader()));
-        self.registers[11] = executable.get_entrypoint_instruction_offset() as u64;
+        self.registers[16] = executable.get_entrypoint_instruction_offset() as u64;
         let config = executable.get_config();
         let initial_insn_count = self.context_object_pointer.get_remaining();
         self.previous_instruction_meter = initial_insn_count;

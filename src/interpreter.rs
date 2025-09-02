@@ -47,7 +47,7 @@ macro_rules! translate_memory_access {
 
 macro_rules! throw_error {
     ($self:expr, $err:expr) => {{
-        $self.vm.registers[11] = $self.reg[11];
+        $self.vm.registers[16] = $self.reg[16];
         $self.vm.program_result = ProgramResult::Err($err);
         return false;
     }};
@@ -98,7 +98,7 @@ pub struct Interpreter<'a, 'b, C: ContextObject> {
     pub(crate) program_vm_addr: u64,
 
     /// General purpose registers and pc
-    pub reg: [u64; 12],
+    pub reg: [u64; 17],
 
     #[cfg(feature = "debugger")]
     pub(crate) debug_state: DebugState,
@@ -111,7 +111,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
     pub fn new(
         vm: &'a mut EbpfVm<'b, C>,
         executable: &'a Executable<C>,
-        registers: [u64; 12],
+        registers: [u64; 17],
     ) -> Self {
         let (program_vm_addr, program) = executable.get_text_bytes();
         Self {
@@ -130,16 +130,16 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
     /// Translate between the virtual machines' pc value and the pc value used by the debugger
     #[cfg(feature = "debugger")]
     pub fn get_dbg_pc(&self) -> u64 {
-        (self.reg[11] * ebpf::INSN_SIZE as u64) + self.executable.get_text_section_offset()
+        (self.reg[16] * ebpf::INSN_SIZE as u64) + self.executable.get_text_section_offset()
     }
 
     fn push_frame(&mut self, config: &Config) -> bool {
         let frame = &mut self.vm.call_frames[self.vm.call_depth as usize];
         frame.caller_saved_registers.copy_from_slice(
-            &self.reg[ebpf::FIRST_SCRATCH_REG..ebpf::FIRST_SCRATCH_REG + ebpf::SCRATCH_REGS],
+            &self.reg[6..16],
         );
         frame.frame_pointer = self.reg[ebpf::FRAME_PTR_REG];
-        frame.target_pc = self.reg[11] + 1;
+        frame.target_pc = self.reg[16] + 1;
 
         self.vm.call_depth += 1;
         if self.vm.call_depth as usize == config.max_call_depth {
@@ -179,23 +179,24 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             throw_error!(self, EbpfError::ExceededMaxInstructions);
         }
         self.vm.due_insn_count += 1;
-        if self.reg[11] as usize * ebpf::INSN_SIZE >= self.program.len() {
+        if self.reg[16] as usize * ebpf::INSN_SIZE >= self.program.len() {
             throw_error!(self, EbpfError::ExecutionOverrun);
         }
-        let mut next_pc = self.reg[11] + 1;
-        let mut insn = ebpf::get_insn_unchecked(self.program, self.reg[11] as usize);
+        let mut next_pc = self.reg[16] + 1;
+        let mut insn = ebpf::get_insn_unchecked(self.program, self.reg[16] as usize);
         let dst = insn.dst as usize;
         let src = insn.src as usize;
 
-        if config.enable_instruction_tracing {
-            self.vm.context_object_pointer.trace(self.reg);
-        }
+        // if config.enable_instruction_tracing {
+        //     self.vm.context_object_pointer.trace(self.reg);
+        // }
 
+        //std::println!("pc: {:x}", self.reg[16]*8 + 0x120);
         match insn.opc {
             ebpf::LD_DW_IMM if !self.executable.get_sbpf_version().disable_lddw() => {
                 ebpf::augment_lddw_unchecked(self.program, &mut insn);
                 self.reg[dst] = insn.imm as u64;
-                self.reg[11] += 1;
+                self.reg[16] += 1;
                 next_pc += 1;
             },
 
@@ -523,7 +524,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let key = self
                     .executable
                     .get_sbpf_version()
-                    .calculate_call_imm_target_pc(self.reg[11] as usize, insn.imm);
+                    .calculate_call_imm_target_pc(self.reg[16] as usize, insn.imm);
                 if self.executable.get_sbpf_version().static_syscalls() {
                     // make BPF to BPF call
                     if !self.push_frame(config) {
@@ -578,15 +579,14 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 self.vm.call_depth -= 1;
                 let frame = &self.vm.call_frames[self.vm.call_depth as usize];
                 self.reg[ebpf::FRAME_PTR_REG] = frame.frame_pointer;
-                self.reg[ebpf::FIRST_SCRATCH_REG
-                    ..ebpf::FIRST_SCRATCH_REG + ebpf::SCRATCH_REGS]
+                self.reg[6..16]
                     .copy_from_slice(&frame.caller_saved_registers);
                 check_pc!(self, next_pc, frame.target_pc);
             }
             _ => throw_error!(self, EbpfError::UnsupportedInstruction),
         }
 
-        self.reg[11] = next_pc;
+        self.reg[16] = next_pc;
         true
     }
 

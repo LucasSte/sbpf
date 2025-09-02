@@ -33,7 +33,7 @@ pub const FRAME_PTR_REG: usize = 10;
 /// First scratch register
 pub const FIRST_SCRATCH_REG: usize = 6;
 /// Number of scratch registers
-pub const SCRATCH_REGS: usize = 4;
+pub const SCRATCH_REGS: usize = 9;
 /// Alignment of the memory regions in host address space in bytes
 pub const HOST_ALIGN: usize = 16;
 /// Upper half of a pointer is the region index, lower half the virtual address inside that region.
