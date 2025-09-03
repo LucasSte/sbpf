@@ -501,6 +501,28 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::JSLE_IMM   => if (self.reg[dst] as i64) <= insn.imm             { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
             ebpf::JSLE_REG   => if (self.reg[dst] as i64) <= self.reg[src] as i64 { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
 
+            // BPF_JMP32 class
+            ebpf::JEQ_IMM32  => if  self.reg[dst] as u32  == insn.imm  as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JEQ_REG32  => if  self.reg[dst] as u32  == self.reg[src] as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JGT_IMM32  => if  self.reg[dst] as u32  >  insn.imm  as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JGT_REG32  => if  self.reg[dst] as u32  >  self.reg[src] as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JGE_IMM32  => if  self.reg[dst] as u32  >= insn.imm  as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JGE_REG32  => if  self.reg[dst] as u32  >= self.reg[src] as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JLT_IMM32  => if (self.reg[dst] as u32) <  insn.imm  as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JLT_REG32  => if (self.reg[dst] as u32) <  self.reg[src] as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JLE_IMM32  => if  self.reg[dst] as u32  <= insn.imm  as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JLE_REG32  => if  self.reg[dst] as u32  <= self.reg[src] as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JNE_IMM32  => if  self.reg[dst] as u32  != insn.imm  as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JNE_REG32  => if  self.reg[dst] as u32  != self.reg[src] as u32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JSGT_IMM32 => if  self.reg[dst] as i32  >  insn.imm as i32              { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JSGT_REG32 => if  self.reg[dst] as i32  >  self.reg[src] as i32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JSGE_IMM32 => if  self.reg[dst] as i32  >= insn.imm as i32              { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JSGE_REG32 => if  self.reg[dst] as i32  >= self.reg[src] as i32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JSLT_IMM32 => if (self.reg[dst] as i32) <  insn.imm as i32              { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JSLT_REG32 => if (self.reg[dst] as i32) <  self.reg[src] as i32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JSLE_IMM32 => if  self.reg[dst] as i32  <= insn.imm as i32              { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JSLE_REG32 => if  self.reg[dst] as i32  <= self.reg[src] as i32      { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+
             ebpf::CALL_REG   => {
                 let target_pc = if self.executable.get_sbpf_version().callx_uses_src_reg() {
                     self.reg[src]
