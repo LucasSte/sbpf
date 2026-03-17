@@ -83,7 +83,7 @@ impl MemoryRegion {
     }
 
     /// Used to create a region for an object other than a slice
-    pub fn new_gapless_from_pointer_readonly(pointer: u64, len: u64, vm_addr: u64) -> Self {
+    pub fn new_gapless_from_pointer_readonly(pointer: u64, vm_addr: u64, len: u64) -> Self {
         Self::new_from_pointer(pointer, len, vm_addr, 0, false)
     }
 
