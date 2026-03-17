@@ -446,6 +446,24 @@ impl AlignedMemoryMapping {
         })
     }
 
+    /// Create an aligned memory mapping with a presorted array of regions
+    pub fn new_sorted(
+        regions: Box<[MemoryRegion]>,
+        config: &Config,
+        sbpf_version: SBPFVersion,
+    ) -> Self {
+        Self {
+            common: CommonMemoryMapping {
+                regions,
+                access_violation_handler: Box::new(default_access_violation_handler),
+                allow_memory_region_zero: config.allow_memory_region_zero,
+                max_call_depth: config.max_call_depth as i64,
+                stack_frame_size: config.stack_frame_size as i64,
+                sbpf_version,
+            },
+        }
+    }
+
     /// Returns the `MemoryRegion` which may contain the given address.
     #[inline(always)]
     pub fn find_region(&self, vm_addr: u64) -> Option<(usize, &MemoryRegion)> {
@@ -476,6 +494,11 @@ impl AlignedMemoryMapping {
         }
         self.common.regions[index] = region;
         Ok(())
+    }
+
+    /// Stop the memory mapping and offload the regions
+    pub fn stop_mapping(&mut self) -> Box<[MemoryRegion]> {
+        std::mem::take(&mut self.common.regions)
     }
 }
 
@@ -539,6 +562,19 @@ impl MemoryMapping {
             sbpf_version,
             Box::new(default_access_violation_handler),
         )
+    }
+
+    /// Create a new memory mapping with an array of sorted regions
+    pub fn new_aligned_sorted(
+        regions: Box<[MemoryRegion]>,
+        config: &Config,
+        sbpf_version: SBPFVersion,
+    ) -> Self {
+        MemoryMapping::Aligned(AlignedMemoryMapping::new_sorted(
+            regions,
+            config,
+            sbpf_version,
+        ))
     }
 
     /// Map virtual memory to host memory.
@@ -662,6 +698,16 @@ impl MemoryMapping {
             MemoryMapping::Aligned(m) => m.replace_region(index, region),
             MemoryMapping::Unaligned(m) => m.replace_region(index, region),
         }
+    }
+
+    /// Stop the memory mapping and offload the regions
+    /// Only allowed for alined mappings
+    pub fn stop_mapping(&mut self) -> Option<Box<[MemoryRegion]>> {
+        if let MemoryMapping::Aligned(aligned_memory) = self {
+            return Some(aligned_memory.stop_mapping());
+        }
+
+        None
     }
 }
 
