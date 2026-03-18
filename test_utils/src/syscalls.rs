@@ -40,7 +40,6 @@ declare_builtin_function!(
         arg3: u64,
         arg4: u64,
         arg5: u64,
-        _memory_mapping: &mut MemoryMapping,
     ) -> Result<u64, Box<dyn std::error::Error>> {
         println!("bpf_trace_printf: {arg3:#x}, {arg4:#x}, {arg5:#x}");
         let size_arg = |x| {
@@ -68,7 +67,6 @@ declare_builtin_function!(
         arg3: u64,
         arg4: u64,
         arg5: u64,
-        _memory_mapping: &mut MemoryMapping,
     ) -> Result<u64, Box<dyn std::error::Error>> {
         Ok(arg1.wrapping_shl(32)
             | arg2.wrapping_shl(24)
@@ -86,19 +84,18 @@ declare_builtin_function!(
     /// cases. Arguments 3 to 5 are unused.
     SyscallMemFrob,
     fn rust(
-        _context_object: &mut TestContextObject,
+        context_object: &mut TestContextObject,
         vm_addr: u64,
         len: u64,
         _arg3: u64,
         _arg4: u64,
         _arg5: u64,
-        memory_mapping: &mut MemoryMapping,
     ) -> Result<u64, Box<dyn std::error::Error>> {
         if len == 0 {
             return Ok(0);
         }
         let host_addr: Result<u64, EbpfError> =
-            memory_mapping.map(AccessType::Store, vm_addr, len).into();
+            context_object.memory_mapping.map(AccessType::Store, vm_addr, len).into();
         let host_addr = host_addr?;
         for i in 0..len {
             unsafe {
@@ -114,21 +111,20 @@ declare_builtin_function!(
     /// C-like `strcmp`, return 0 if the strings are equal, and a non-null value otherwise.
     SyscallStrCmp,
     fn rust(
-        _context_object: &mut TestContextObject,
+        context_object: &mut TestContextObject,
         arg1: u64,
         arg2: u64,
         _arg3: u64,
         _arg4: u64,
         _arg5: u64,
-        memory_mapping: &mut MemoryMapping,
     ) -> Result<u64, Box<dyn std::error::Error>> {
         // C-like strcmp, maybe shorter than converting the bytes to string and comparing?
         if arg1 == 0 || arg2 == 0 {
             return Ok(u64::MAX);
         }
-        let a: Result<u64, EbpfError> = memory_mapping.map(AccessType::Load, arg1, 1).into();
+        let a: Result<u64, EbpfError> = context_object.memory_mapping.map(AccessType::Load, arg1, 1).into();
         let mut a = a?;
-        let b: Result<u64, EbpfError> = memory_mapping.map(AccessType::Load, arg2, 1).into();
+        let b: Result<u64, EbpfError> = context_object.memory_mapping.map(AccessType::Load, arg2, 1).into();
         let mut b = b?;
         unsafe {
             let mut a_val = *(a as *const u8);
@@ -152,19 +148,18 @@ declare_builtin_function!(
     /// Prints a NULL-terminated UTF-8 string.
     SyscallString,
     fn rust(
-        _context_object: &mut TestContextObject,
+        context_object: &mut TestContextObject,
         vm_addr: u64,
         len: u64,
         _arg3: u64,
         _arg4: u64,
         _arg5: u64,
-        memory_mapping: &mut MemoryMapping,
     ) -> Result<u64, Box<dyn std::error::Error>> {
         if len == 0 {
             return Ok(0);
         }
         let host_addr: Result<u64, EbpfError> =
-            memory_mapping.map(AccessType::Load, vm_addr, len).into();
+            context_object.memory_mapping.map(AccessType::Load, vm_addr, len).into();
         let host_addr = host_addr?;
         unsafe {
             let c_buf = from_raw_parts(host_addr as *const u8, len as usize);
@@ -180,17 +175,16 @@ declare_builtin_function!(
     /// Prints the five arguments formated as u64 in decimal.
     SyscallU64,
     fn rust(
-        _context_object: &mut TestContextObject,
+        context_object: &mut TestContextObject,
         arg1: u64,
         arg2: u64,
         arg3: u64,
         arg4: u64,
         arg5: u64,
-        memory_mapping: &mut MemoryMapping,
     ) -> Result<u64, Box<dyn std::error::Error>> {
         println!(
             "dump_64: {:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:?}",
-            arg1, arg2, arg3, arg4, arg5, memory_mapping as *const _
+            arg1, arg2, arg3, arg4, arg5, &context_object.memory_mapping as *const _
         );
         Ok(0)
     }
@@ -206,7 +200,6 @@ declare_builtin_function!(
         arg3: u64,
         arg4: u64,
         arg5: u64,
-        _memory_mapping: &mut MemoryMapping,
     ) -> Result<u64, Box<dyn std::error::Error>> {
         loop {
             let _ = G::clone;

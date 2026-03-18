@@ -22,10 +22,11 @@ use solana_sbpf::{
 pub mod syscalls;
 
 /// Simple instruction meter for testing
-#[derive(Debug, Clone, Default)]
+#[derive(Debug)]
 pub struct TestContextObject {
     /// Maximal amount of instructions which still can be executed
     pub remaining: u64,
+    pub memory_mapping: MemoryMapping,
 }
 
 impl ContextObject for TestContextObject {
@@ -36,12 +37,31 @@ impl ContextObject for TestContextObject {
     fn get_remaining(&self) -> u64 {
         self.remaining
     }
+
+    fn get_mut_mapping(&mut self) -> &mut MemoryMapping {
+        &mut self.memory_mapping
+    }
 }
 
 impl TestContextObject {
     /// Initialize with instruction meter
     pub fn new(remaining: u64) -> Self {
-        Self { remaining }
+        Self {
+            remaining,
+            memory_mapping: MemoryMapping::Identity,
+        }
+    }
+}
+
+impl TestContextObject {
+    fn set_mapping(&mut self, mapping: MemoryMapping) {
+        self.memory_mapping = mapping;
+    }
+}
+
+impl Default for TestContextObject {
+    fn default() -> Self {
+        TestContextObject::new(0)
     }
 }
 
@@ -258,6 +278,7 @@ macro_rules! create_vm {
             $access_violation_handler,
         )
         .unwrap();
+        $context_object.set_mapping(memory_mapping);
         let mut $vm_name = solana_sbpf::vm::EbpfVm::new(
             $verified_executable.get_loader().clone(),
             $verified_executable.get_sbpf_version(),

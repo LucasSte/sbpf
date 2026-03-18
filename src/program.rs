@@ -348,7 +348,6 @@ where
         arg_c: u64,
         arg_d: u64,
         arg_e: u64,
-        memory_mapping: &mut MemoryMapping,
     ) -> Result<u64, Self::Error>;
 
     /// The VM wrapper.
@@ -369,7 +368,6 @@ where
                     c,
                     d,
                     e,
-                    &mut vm.memory_mapping,
                 )
                 .map_err(|err| crate::error::EbpfError::SyscallError(err.into()))
                 .into();
@@ -424,7 +422,6 @@ macro_rules! declare_builtin_function {
             $arg_c:ident : u64,
             $arg_d:ident : u64,
             $arg_e:ident : u64,
-            $memory_mapping:ident : &mut $MemoryMapping:ty,
         ) -> Result<$Ok:ty, $Err:ty> {
             $($rust:tt)*
         }
@@ -450,7 +447,6 @@ macro_rules! declare_builtin_function {
                 $arg_c: u64,
                 $arg_d: u64,
                 $arg_e: u64,
-                $memory_mapping: &mut $MemoryMapping,
             ) -> core::result::Result<$Ok, $Err> {
                 $($rust)*
             }

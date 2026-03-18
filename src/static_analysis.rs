@@ -11,6 +11,7 @@ use crate::{
 };
 use rustc_demangle::demangle;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use crate::memory_region::MemoryMapping;
 
 /// Register state recorded after executing one instruction
 ///
@@ -124,13 +125,19 @@ impl Default for CfgNode {
     }
 }
 
-pub(crate) struct DummyContextObject {}
+pub(crate) struct DummyContextObject {
+    memory_mapping: MemoryMapping,
+}
 
 impl ContextObject for DummyContextObject {
     fn consume(&mut self, _amount: u64) {}
 
     fn get_remaining(&self) -> u64 {
         0
+    }
+
+    fn get_mut_mapping(&mut self) -> &mut MemoryMapping {
+        &mut self.memory_mapping
     }
 }
 

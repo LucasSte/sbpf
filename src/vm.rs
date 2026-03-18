@@ -21,7 +21,7 @@ use crate::{
     program::{BuiltinFunction, BuiltinProgram, FunctionRegistry, SBPFVersion},
     static_analysis::{Analysis, DummyContextObject, RegisterTraceEntry},
 };
-use std::{collections::BTreeMap, fmt::Debug, marker::PhantomData, mem::offset_of};
+use std::{collections::BTreeMap, fmt::Debug, marker::PhantomData, mem, mem::offset_of, ptr};
 
 #[cfg(feature = "shuttle-test")]
 use shuttle::sync::Arc;
@@ -32,6 +32,8 @@ use std::sync::Arc;
 use rand::{thread_rng, Rng};
 #[cfg(all(feature = "jit", feature = "shuttle-test"))]
 use shuttle::rand::{thread_rng, Rng};
+use crate::aligned_memory::Pod;
+use crate::memory_region::AccessType;
 
 /// Returns (and if not done before generates) the encryption key for the VM pointer
 #[cfg(feature = "jit")]
@@ -150,6 +152,7 @@ pub trait ContextObject {
     fn consume(&mut self, amount: u64);
     /// Get the number of remaining instructions allowed
     fn get_remaining(&self) -> u64;
+    fn get_mut_mapping(&mut self) -> &mut MemoryMapping;
 }
 
 /// Statistic of taken branches (from a recorded trace)
@@ -218,8 +221,6 @@ pub enum RuntimeEnvironmentSlot {
     Registers = offset_of!(EbpfVm<DummyContextObject>, registers) as isize,
     /// [EbpfVm::program_result]
     ProgramResult = offset_of!(EbpfVm<DummyContextObject>, program_result) as isize,
-    /// [EbpfVm::memory_mapping]
-    MemoryMapping = offset_of!(EbpfVm<DummyContextObject>, memory_mapping) as isize,
     /// [EbpfVm::register_trace]
     RegisterTrace = offset_of!(EbpfVm<DummyContextObject>, register_trace) as isize,
 }
@@ -303,8 +304,6 @@ pub struct EbpfVm<'a, C: ContextObject> {
     pub registers: [u64; 12],
     /// ProgramResult inlined
     pub program_result: ProgramResult,
-    /// MemoryMapping inlined
-    pub memory_mapping: MemoryMapping,
     /// Stack of CallFrames used by the Interpreter
     pub call_frames: Vec<CallFrame>,
     /// Loader built-in program
@@ -325,7 +324,6 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         loader: Arc<BuiltinProgram<C>>,
         sbpf_version: SBPFVersion,
         context_object: &'a mut C,
-        mut memory_mapping: MemoryMapping,
         stack_len: usize,
     ) -> Self {
         let config = loader.get_config();
@@ -337,7 +335,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 stack_len
             } as u64);
         if !config.enable_address_translation {
-            memory_mapping = MemoryMapping::new_identity();
+            *context_object.get_mut_mapping() = MemoryMapping::new_identity();
         }
         EbpfVm {
             host_stack_pointer: std::ptr::null_mut(),
@@ -349,7 +347,6 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             stopwatch_denominator: 0,
             registers,
             program_result: ProgramResult::Ok(0),
-            memory_mapping,
             call_frames: vec![CallFrame::default(); config.max_call_depth],
             loader,
             #[cfg(feature = "debugger")]
@@ -454,6 +451,32 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             addr.wrapping_add(get_runtime_environment_key() as isize) as usize as u64,
             PhantomData,
         )
+    }
+
+    /// Loads `size_of::<T>()` bytes from the given address.
+    pub fn load<T: Pod + Into<u64>>(&mut self, vm_addr: u64) -> ProgramResult {
+        let len = mem::size_of::<T>() as u64;
+        debug_assert!(len <= mem::size_of::<u64>() as u64);
+        match self.context_object_pointer.get_mut_mapping().map_with_access_violation_handler(AccessType::Load, vm_addr, len) {
+            ProgramResult::Ok(host_addr) => {
+                ProgramResult::Ok(unsafe { ptr::read_unaligned::<T>(host_addr as *const T) }.into())
+            }
+            err => err,
+        }
+    }
+
+    /// Store `value` at the given address.
+    #[inline]
+    pub fn store<T: Pod>(&mut self, value: T, vm_addr: u64) -> ProgramResult {
+        let len = mem::size_of::<T>() as u64;
+        debug_assert!(len <= mem::size_of::<u64>() as u64);
+        match self.context_object_pointer.get_mut_mapping().map_with_access_violation_handler(AccessType::Store, vm_addr, len) {
+            ProgramResult::Ok(host_addr) => {
+                unsafe { ptr::write_unaligned(host_addr as *mut T, value) };
+                ProgramResult::Ok(host_addr)
+            }
+            err => err,
+        }
     }
 }
 

@@ -23,7 +23,7 @@ use crate::{
 /// Virtual memory operation helper.
 macro_rules! translate_memory_access {
     (_impl, $self:ident, $op:ident, $vm_addr:ident, $T:ty, $($rest:expr),*) => {
-        match $self.vm.memory_mapping.$op::<$T>(
+        match $self.vm.$op::<$T>(
             $($rest,)*
             $vm_addr,
         ) {
