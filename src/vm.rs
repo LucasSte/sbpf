@@ -21,7 +21,7 @@ use crate::{
     program::{BuiltinFunction, BuiltinProgram, FunctionRegistry, SBPFVersion},
     static_analysis::{Analysis, DummyContextObject, RegisterTraceEntry},
 };
-use std::{collections::BTreeMap, fmt::Debug, marker::PhantomData, mem, mem::offset_of, ptr};
+use std::{collections::BTreeMap, fmt::Debug, marker::PhantomData, mem::offset_of};
 
 #[cfg(feature = "shuttle-test")]
 use shuttle::sync::Arc;
@@ -32,8 +32,6 @@ use std::sync::Arc;
 use rand::{thread_rng, Rng};
 #[cfg(all(feature = "jit", feature = "shuttle-test"))]
 use shuttle::rand::{thread_rng, Rng};
-use crate::aligned_memory::Pod;
-use crate::memory_region::AccessType;
 
 /// Returns (and if not done before generates) the encryption key for the VM pointer
 #[cfg(feature = "jit")]
@@ -224,6 +222,8 @@ pub enum RuntimeEnvironmentSlot {
     ProgramResult = offset_of!(EbpfVm<DummyContextObject>, program_result) as isize,
     /// [EbpfVm::register_trace]
     RegisterTrace = offset_of!(EbpfVm<DummyContextObject>, register_trace) as isize,
+    /// [EbpfVm::memory_mapping]
+    MemoryMapping = offset_of!(EbpfVm<DummyContextObject>, memory_mapping) as isize,
 }
 
 /// A virtual machine to run eBPF programs.
@@ -313,7 +313,7 @@ pub struct EbpfVm<'a, C: ContextObject> {
     /// Collector for the instruction trace
     pub register_trace: Vec<RegisterTraceEntry>,
     /// Memory mapping for internal usage
-    memory_mapping: *mut MemoryMapping,
+    pub(crate) memory_mapping: *mut MemoryMapping,
     /// TCP port for the debugger interface
     #[cfg(feature = "debugger")]
     pub debug_port: Option<u16>,
@@ -461,38 +461,6 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             addr.wrapping_add(get_runtime_environment_key() as isize) as usize as u64,
             PhantomData,
         )
-    }
-
-    /// Loads `size_of::<T>()` bytes from the given address.
-    pub fn load<T: Pod + Into<u64>>(&mut self, vm_addr: u64) -> ProgramResult {
-        let len = mem::size_of::<T>() as u64;
-        debug_assert!(len <= mem::size_of::<u64>() as u64);
-
-        unsafe {
-            match (*self.memory_mapping).map_with_access_violation_handler(AccessType::Load, vm_addr, len) {
-                ProgramResult::Ok(host_addr) => {
-                    ProgramResult::Ok(ptr::read_unaligned::<T>(host_addr as *const T).into())
-                }
-                err => err,
-            }
-        }
-    }
-
-    /// Store `value` at the given address.
-    #[inline]
-    pub fn store<T: Pod>(&mut self, value: T, vm_addr: u64) -> ProgramResult {
-        let len = mem::size_of::<T>() as u64;
-        debug_assert!(len <= mem::size_of::<u64>() as u64);
-
-        unsafe {
-            match (*self.memory_mapping).map_with_access_violation_handler(AccessType::Store, vm_addr, len) {
-                ProgramResult::Ok(host_addr) => {
-                    ptr::write_unaligned(host_addr as *mut T, value);
-                    ProgramResult::Ok(host_addr)
-                }
-                err => err,
-            }
-        }
     }
 }
 

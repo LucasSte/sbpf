@@ -6,8 +6,8 @@ use crate::{
     program::SBPFVersion,
     vm::Config,
 };
-use std::{array, cell::UnsafeCell, fmt, ops::Range};
-
+use std::{array, cell::UnsafeCell, fmt, mem, ops::Range, ptr};
+use crate::aligned_memory::Pod;
 /* Explanation of the Gapped Memory
 
     The MemoryMapping supports a special mapping mode which is used for the stack MemoryRegion.
@@ -682,6 +682,34 @@ impl MemoryMapping {
 
         None
     }
+
+    /// Loads `size_of::<T>()` bytes from the given address.
+    pub fn load<T: Pod + Into<u64>>(&mut self, vm_addr: u64) -> ProgramResult {
+        let len = mem::size_of::<T>() as u64;
+        debug_assert!(len <= mem::size_of::<u64>() as u64);
+
+        match self.map_with_access_violation_handler(AccessType::Load, vm_addr, len) {
+            ProgramResult::Ok(host_addr) => {
+                ProgramResult::Ok(unsafe { ptr::read_unaligned::<T>(host_addr as *const T) }.into())
+            }
+            err => err,
+        }
+    }
+
+    /// Store `value` at the given address.
+    #[inline]
+    pub fn store<T: Pod>(&mut self, value: T, vm_addr: u64) -> ProgramResult {
+        let len = mem::size_of::<T>() as u64;
+        debug_assert!(len <= mem::size_of::<u64>() as u64);
+
+        match self.map_with_access_violation_handler(AccessType::Store, vm_addr, len) {
+            ProgramResult::Ok(host_addr) => {
+                unsafe { ptr::write_unaligned(host_addr as *mut T, value); }
+                ProgramResult::Ok(host_addr)
+            }
+            err => err,
+        }
+    }
 }
 
 /// Fast, small linear cache used to speed up unaligned memory mapping.
@@ -739,41 +767,9 @@ impl MappingCache {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-use std::{cell::RefCell, rc::Rc};
+    use std::{cell::RefCell, rc::Rc};
     use test_utils::assert_error;
-    use crate::program::BuiltinProgram;
-    use crate::vm::{ContextObject, EbpfVm};
     use super::*;
-    
-    struct MockContext {
-        pub memory_mapping: MemoryMapping,
-    }
-    
-    impl ContextObject for MockContext {
-        fn consume(&mut self, _amount: u64) {
-            
-        }
-
-        fn get_remaining(&self) -> u64 {
-            0
-        }
-
-        fn get_mapping_pointer(&mut self) -> *mut MemoryMapping {
-            &raw mut self.memory_mapping
-        }
-    }
-    
-    macro_rules! dummy_vm {
-        ($memory_mapping:expr, $vm:ident) => {
-            let mut context = MockContext {
-                memory_mapping: $memory_mapping,
-            };
-            
-            let loader = BuiltinProgram::<MockContext>::new_mock();
-            let mut $vm = EbpfVm::new(Arc::new(loader), SBPFVersion::V3, &mut context, 256);
-        };
-    }
 
     #[test]
     fn test_mapping_cache() {
@@ -856,7 +852,7 @@ use std::{cell::RefCell, rc::Rc};
                 ..Config::default()
             };
             let mut mem1 = vec![0xff; 8];
-            let m = MemoryMapping::new(
+            let mut m = MemoryMapping::new(
                 vec![
                     MemoryRegion::new_readonly(&[0; 8], ebpf::MM_REGION_SIZE),
                     MemoryRegion::new_writable_gapped(&mut mem1, ebpf::MM_REGION_SIZE * 2, 2),
@@ -866,20 +862,17 @@ use std::{cell::RefCell, rc::Rc};
             )
             .unwrap();
             
-            dummy_vm!(m, vm);
-            
             for frame in 0..4 {
                 let address = ebpf::MM_STACK_START + frame * 4;
                 {
-                    let mapping = unsafe {&*vm.context_object_pointer.get_mapping_pointer() };
-                    assert!(mapping.find_region(address).is_some());
-                    assert!(mapping.map(AccessType::Load, address, 2).is_ok());
-                    assert_error!(mapping.map(AccessType::Load, address + 2, 2), "AccessViolation");
+                    assert!(m.find_region(address).is_some());
+                    assert!(m.map(AccessType::Load, address, 2).is_ok());
+                    assert_error!(m.map(AccessType::Load, address + 2, 2), "AccessViolation");
                 }
-                assert_eq!(vm.load::<u16>(address).unwrap(), 0xFFFF);
-                assert_error!(vm.load::<u16>(address + 2), "AccessViolation");
-                assert!(vm.store::<u16>(0xFFFF, address).is_ok());
-                assert_error!(vm.store::<u16>(0xFFFF, address + 2), "AccessViolation");
+                assert_eq!(m.load::<u16>(address).unwrap(), 0xFFFF);
+                assert_error!(m.load::<u16>(address + 2), "AccessViolation");
+                assert!(m.store::<u16>(0xFFFF, address).is_ok());
+                assert_error!(m.store::<u16>(0xFFFF, address + 2), "AccessViolation");
             }
         }
     }
@@ -1085,7 +1078,7 @@ use std::{cell::RefCell, rc::Rc};
         };
         let mem1 = [0x11, 0x22];
         let mem2 = [0x33];
-        let m = MemoryMapping::new(
+        let mut m = MemoryMapping::new(
             vec![
                 MemoryRegion::new_readonly(&mem1, ebpf::MM_REGION_SIZE),
                 MemoryRegion::new_readonly(&mem2, ebpf::MM_REGION_SIZE + mem1.len() as u64),
@@ -1094,12 +1087,10 @@ use std::{cell::RefCell, rc::Rc};
             SBPFVersion::V3,
         )
         .unwrap();
-        
-        dummy_vm!(m, vm);
-        
-        assert_eq!(vm.load::<u16>(ebpf::MM_REGION_SIZE).unwrap(), 0x2211);
-        assert_error!(vm.load::<u32>(ebpf::MM_REGION_SIZE), "AccessViolation");
-        assert_error!(vm.load::<u32>(ebpf::MM_REGION_SIZE + 4), "AccessViolation");
+
+        assert_eq!(m.load::<u16>(ebpf::MM_REGION_SIZE).unwrap(), 0x2211);
+        assert_error!(m.load::<u32>(ebpf::MM_REGION_SIZE), "AccessViolation");
+        assert_error!(m.load::<u32>(ebpf::MM_REGION_SIZE + 4), "AccessViolation");
     }
 
     #[test]
@@ -1110,7 +1101,7 @@ use std::{cell::RefCell, rc::Rc};
         };
         let mut mem1 = vec![0xff, 0xff];
         let mut mem2 = vec![0xff];
-        let m = MemoryMapping::new(
+        let mut m = MemoryMapping::new(
             vec![
                 MemoryRegion::new_writable(&mut mem1, ebpf::MM_REGION_SIZE),
                 MemoryRegion::new_writable(&mut mem2, ebpf::MM_REGION_SIZE + mem1.len() as u64),
@@ -1119,14 +1110,12 @@ use std::{cell::RefCell, rc::Rc};
             SBPFVersion::V3,
         )
         .unwrap();
-
-        dummy_vm!(m, vm);
         
-        vm.store(0x1122u16, ebpf::MM_REGION_SIZE).unwrap();
-        assert_eq!(vm.load::<u16>(ebpf::MM_REGION_SIZE).unwrap(), 0x1122);
+        m.store(0x1122u16, ebpf::MM_REGION_SIZE).unwrap();
+        assert_eq!(m.load::<u16>(ebpf::MM_REGION_SIZE).unwrap(), 0x1122);
 
         assert_error!(
-            vm.store(0x33445566u32, ebpf::MM_REGION_SIZE),
+            m.store(0x33445566u32, ebpf::MM_REGION_SIZE),
             "AccessViolation"
         );
     }
@@ -1139,25 +1128,23 @@ use std::{cell::RefCell, rc::Rc};
         };
 
         let mut mem1 = vec![0xFF];
-        let m = MemoryMapping::new(
+        let mut m = MemoryMapping::new(
             vec![MemoryRegion::new_writable(&mut mem1, ebpf::MM_REGION_SIZE)],
             &config,
             SBPFVersion::V3,
         )
         .unwrap();
         
-        dummy_vm!(m, vm);
-        
-        vm.store(0x11u8, ebpf::MM_REGION_SIZE).unwrap();
-        assert_error!(vm.store(0x11u8, ebpf::MM_REGION_SIZE - 1), "AccessViolation");
-        assert_error!(vm.store(0x11u8, ebpf::MM_REGION_SIZE + 1), "AccessViolation");
+        m.store(0x11u8, ebpf::MM_REGION_SIZE).unwrap();
+        assert_error!(m.store(0x11u8, ebpf::MM_REGION_SIZE - 1), "AccessViolation");
+        assert_error!(m.store(0x11u8, ebpf::MM_REGION_SIZE + 1), "AccessViolation");
         // this gets us line coverage for the case where we're completely
         // outside the address space (the case above is just on the edge)
-        assert_error!(vm.store(0x11u8, ebpf::MM_REGION_SIZE + 2), "AccessViolation");
+        assert_error!(m.store(0x11u8, ebpf::MM_REGION_SIZE + 2), "AccessViolation");
 
         let mut mem1 = vec![0xFF; 4];
         let mut mem2 = vec![0xDD; 4];
-        let m = MemoryMapping::new(
+        let mut m = MemoryMapping::new(
             vec![
                 MemoryRegion::new_writable(&mut mem1, ebpf::MM_REGION_SIZE),
                 MemoryRegion::new_writable(&mut mem2, ebpf::MM_REGION_SIZE + 4),
@@ -1166,10 +1153,9 @@ use std::{cell::RefCell, rc::Rc};
             SBPFVersion::V3,
         )
         .unwrap();
-        
-        dummy_vm!(m, vm);
+
         assert_error!(
-            vm.store(0x1122334455667788u64, ebpf::MM_REGION_SIZE),
+            m.store(0x1122334455667788u64, ebpf::MM_REGION_SIZE),
             "AccessViolation"
         );
     }
@@ -1182,22 +1168,21 @@ use std::{cell::RefCell, rc::Rc};
         };
 
         let mem1 = vec![0xff];
-        let m = MemoryMapping::new(
+        let mut m = MemoryMapping::new(
             vec![MemoryRegion::new_readonly(&mem1, ebpf::MM_REGION_SIZE)],
             &config,
             SBPFVersion::V3,
         )
         .unwrap();
-        
-        dummy_vm!(m, vm);
-        assert_eq!(vm.load::<u8>(ebpf::MM_REGION_SIZE).unwrap(), 0xff);
-        assert_error!(vm.load::<u8>(ebpf::MM_REGION_SIZE - 1), "AccessViolation");
-        assert_error!(vm.load::<u8>(ebpf::MM_REGION_SIZE + 1), "AccessViolation");
-        assert_error!(vm.load::<u8>(ebpf::MM_REGION_SIZE + 2), "AccessViolation");
+
+        assert_eq!(m.load::<u8>(ebpf::MM_REGION_SIZE).unwrap(), 0xff);
+        assert_error!(m.load::<u8>(ebpf::MM_REGION_SIZE - 1), "AccessViolation");
+        assert_error!(m.load::<u8>(ebpf::MM_REGION_SIZE + 1), "AccessViolation");
+        assert_error!(m.load::<u8>(ebpf::MM_REGION_SIZE + 2), "AccessViolation");
 
         let mem1 = vec![0xFF; 4];
         let mem2 = vec![0xDD; 4];
-        let m = MemoryMapping::new(
+        let mut m = MemoryMapping::new(
             vec![
                 MemoryRegion::new_readonly(&mem1, ebpf::MM_REGION_SIZE),
                 MemoryRegion::new_readonly(&mem2, ebpf::MM_REGION_SIZE + 4),
@@ -1207,9 +1192,7 @@ use std::{cell::RefCell, rc::Rc};
         )
         .unwrap();
 
-        dummy_vm!(m, vm);
-
-        assert_error!(vm.load::<u64>(ebpf::MM_REGION_SIZE), "AccessViolation");
+        assert_error!(m.load::<u64>(ebpf::MM_REGION_SIZE), "AccessViolation");
     }
 
     #[test]
@@ -1221,7 +1204,7 @@ use std::{cell::RefCell, rc::Rc};
         };
         let mut mem1 = vec![0xff, 0xff];
         let mem2 = vec![0xff, 0xff];
-        let m = MemoryMapping::new(
+        let mut m = MemoryMapping::new(
             vec![
                 MemoryRegion::new_writable(&mut mem1, ebpf::MM_REGION_SIZE),
                 MemoryRegion::new_readonly(&mem2, ebpf::MM_REGION_SIZE + mem1.len() as u64),
@@ -1231,9 +1214,7 @@ use std::{cell::RefCell, rc::Rc};
         )
         .unwrap();
 
-        dummy_vm!(m, vm);
-
-        vm.store(0x11223344, ebpf::MM_REGION_SIZE).unwrap();
+        m.store(0x11223344, ebpf::MM_REGION_SIZE).unwrap();
     }
 
     #[test]
@@ -1427,7 +1408,7 @@ use std::{cell::RefCell, rc::Rc};
             regions[0].access_violation_handler_payload = Some(0);
 
             let c = Rc::clone(&copied);
-            let m = MemoryMapping::new_with_access_violation_handler(
+            let mut m = MemoryMapping::new_with_access_violation_handler(
                 regions,
                 &config,
                 SBPFVersion::V3,
@@ -1444,15 +1425,14 @@ use std::{cell::RefCell, rc::Rc};
                 original.as_ptr() as u64
             );
 
-            dummy_vm!(m, vm);
-            assert_eq!(vm.load::<u8>(ebpf::MM_REGION_SIZE).unwrap(), 11);
-            assert_eq!(vm.load::<u8>(ebpf::MM_REGION_SIZE + 1).unwrap(), 22);
+            assert_eq!(m.load::<u8>(ebpf::MM_REGION_SIZE).unwrap(), 11);
+            assert_eq!(m.load::<u8>(ebpf::MM_REGION_SIZE + 1).unwrap(), 22);
             assert!(copied.borrow().is_empty());
 
-            vm.store(33u8, ebpf::MM_REGION_SIZE).unwrap();
+            m.store(33u8, ebpf::MM_REGION_SIZE).unwrap();
             assert_eq!(original[0], 11);
-            assert_eq!(vm.load::<u8>(ebpf::MM_REGION_SIZE).unwrap(), 33);
-            assert_eq!(vm.load::<u8>(ebpf::MM_REGION_SIZE + 1).unwrap(), 22);
+            assert_eq!(m.load::<u8>(ebpf::MM_REGION_SIZE).unwrap(), 33);
+            assert_eq!(m.load::<u8>(ebpf::MM_REGION_SIZE + 1).unwrap(), 22);
         }
     }
 
@@ -1474,7 +1454,7 @@ use std::{cell::RefCell, rc::Rc};
             regions[0].access_violation_handler_payload = Some(42);
 
             let c = Rc::clone(&copied);
-            let m = MemoryMapping::new_with_access_violation_handler(
+            let mut m = MemoryMapping::new_with_access_violation_handler(
                 regions,
                 &config,
                 SBPFVersion::V3,
@@ -1489,10 +1469,9 @@ use std::{cell::RefCell, rc::Rc};
             )
             .unwrap();
 
-            dummy_vm!(m, vm);
-            vm.store(55u8, ebpf::MM_REGION_SIZE).unwrap();
+            m.store(55u8, ebpf::MM_REGION_SIZE).unwrap();
             assert_eq!(original1[0], 11);
-            assert_eq!(vm.load::<u8>(ebpf::MM_REGION_SIZE).unwrap(), 55);
+            assert_eq!(m.load::<u8>(ebpf::MM_REGION_SIZE).unwrap(), 55);
         }
     }
 
@@ -1519,7 +1498,7 @@ use std::{cell::RefCell, rc::Rc};
         let config = Config::default();
         let original = [11, 22];
 
-        let m = MemoryMapping::new_with_access_violation_handler(
+        let mut m = MemoryMapping::new_with_access_violation_handler(
             vec![MemoryRegion::new_readonly(&original, ebpf::MM_REGION_SIZE)],
             &config,
             SBPFVersion::V4,
@@ -1527,9 +1506,7 @@ use std::{cell::RefCell, rc::Rc};
         )
         .unwrap();
 
-
-        dummy_vm!(m, vm);
-        vm.store(33u8, ebpf::MM_REGION_SIZE).unwrap();
+        m.store(33u8, ebpf::MM_REGION_SIZE).unwrap();
     }
 
     #[test]

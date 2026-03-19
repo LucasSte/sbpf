@@ -58,7 +58,7 @@ impl TestContextObject {
         self.memory_mapping = mapping;
     }
     pub fn set_remaining(&mut self, remaining: u64) {
-        self.remaining = self.remaining;
+        self.remaining = remaining;
     }
 }
 

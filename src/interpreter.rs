@@ -23,7 +23,8 @@ use crate::{
 /// Virtual memory operation helper.
 macro_rules! translate_memory_access {
     (_impl, $self:ident, $op:ident, $vm_addr:ident, $T:ty, $($rest:expr),*) => {
-        match $self.vm.$op::<$T>(
+        unsafe {
+                match (*$self.vm.memory_mapping).$op::<$T>(
             $($rest,)*
             $vm_addr,
         ) {
@@ -31,6 +32,7 @@ macro_rules! translate_memory_access {
             ProgramResult::Err(err) => {
                 throw_error!($self, err);
             },
+        }
         }
     };
 
