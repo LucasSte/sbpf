@@ -336,7 +336,7 @@ macro_rules! test_interpreter_and_jit {
         };
         #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
         {
-            context_object.set_remainig(0);
+            context_object.set_remaining(0);
             #[allow(unused_mut)]
             let compilation_result = $executable.jit_compile();
             let mut mem = $mem;
