@@ -136,8 +136,8 @@ impl ContextObject for DummyContextObject {
         0
     }
 
-    fn get_mut_mapping(&mut self) -> &mut MemoryMapping {
-        &mut self.memory_mapping
+    fn get_mapping_pointer(&mut self) -> *mut MemoryMapping {
+        &raw mut self.memory_mapping
     }
 }
 

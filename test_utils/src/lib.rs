@@ -38,8 +38,8 @@ impl ContextObject for TestContextObject {
         self.remaining
     }
 
-    fn get_mut_mapping(&mut self) -> &mut MemoryMapping {
-        &mut self.memory_mapping
+    fn get_mapping_pointer(&mut self) -> *mut MemoryMapping {
+        &raw mut self.memory_mapping
     }
 }
 
@@ -54,8 +54,11 @@ impl TestContextObject {
 }
 
 impl TestContextObject {
-    fn set_mapping(&mut self, mapping: MemoryMapping) {
+    pub fn set_mapping(&mut self, mapping: MemoryMapping) {
         self.memory_mapping = mapping;
+    }
+    pub fn set_remaining(&mut self, remaining: u64) {
+        self.remaining = self.remaining;
     }
 }
 
@@ -283,7 +286,6 @@ macro_rules! create_vm {
             $verified_executable.get_loader().clone(),
             $verified_executable.get_sbpf_version(),
             $context_object,
-            memory_mapping,
             stack_len,
         );
         $vm_name.registers[1] = solana_sbpf::ebpf::MM_INPUT_START;
@@ -311,7 +313,6 @@ macro_rules! test_interpreter_and_jit {
         let (instruction_count_interpreter, result_interpreter, interpreter_final_pc, _trace_interpreter) = {
             let mut mem = $mem;
             let mem_region = MemoryRegion::new_writable(&mut mem, ebpf::MM_INPUT_START);
-            let mut context_object = context_object.clone();
             create_vm!(
                 vm,
                 &$executable,
@@ -335,6 +336,7 @@ macro_rules! test_interpreter_and_jit {
         };
         #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
         {
+            context_object.set_remainig(0);
             #[allow(unused_mut)]
             let compilation_result = $executable.jit_compile();
             let mut mem = $mem;

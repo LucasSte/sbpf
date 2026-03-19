@@ -25,7 +25,7 @@ use crate::TestContextObject;
 use solana_sbpf::{
     declare_builtin_function,
     error::EbpfError,
-    memory_region::{AccessType, MemoryMapping},
+    memory_region::{AccessType},
 };
 use std::{slice::from_raw_parts, str::from_utf8};
 

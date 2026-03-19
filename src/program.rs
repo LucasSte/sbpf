@@ -3,7 +3,6 @@ use {
     crate::{
         ebpf,
         elf::ElfError,
-        memory_region::MemoryMapping,
         vm::{Config, ContextObject, EncryptedHostAddressToEbpfVm},
     },
     std::collections::{btree_map::Entry, BTreeMap},

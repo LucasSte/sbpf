@@ -152,7 +152,8 @@ pub trait ContextObject {
     fn consume(&mut self, amount: u64);
     /// Get the number of remaining instructions allowed
     fn get_remaining(&self) -> u64;
-    fn get_mut_mapping(&mut self) -> &mut MemoryMapping;
+    /// Return a pointer to the memory mapping to be used in this program
+    fn get_mapping_pointer(&mut self) -> *mut MemoryMapping;
 }
 
 /// Statistic of taken branches (from a recorded trace)
@@ -271,8 +272,9 @@ pub enum RuntimeEnvironmentSlot {
 /// ];
 ///
 /// let memory_mapping = MemoryMapping::new(regions, executable.get_config(), sbpf_version).unwrap();
+/// context_object.set_mapping(memory_mapping);
 ///
-/// let mut vm = EbpfVm::new(loader, sbpf_version, &mut context_object, memory_mapping, stack_len);
+/// let mut vm = EbpfVm::new(loader, sbpf_version, &mut context_object, stack_len);
 ///
 /// let (instruction_count, result) = vm.execute_program(
 ///     &executable,
@@ -310,6 +312,8 @@ pub struct EbpfVm<'a, C: ContextObject> {
     pub loader: Arc<BuiltinProgram<C>>,
     /// Collector for the instruction trace
     pub register_trace: Vec<RegisterTraceEntry>,
+    /// Memory mapping for internal usage
+    memory_mapping: *mut MemoryMapping,
     /// TCP port for the debugger interface
     #[cfg(feature = "debugger")]
     pub debug_port: Option<u16>,
@@ -334,8 +338,13 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             } else {
                 stack_len
             } as u64);
+
+        let current_mapping = context_object.get_mapping_pointer();
+
         if !config.enable_address_translation {
-            *context_object.get_mut_mapping() = MemoryMapping::new_identity();
+            unsafe {
+                *current_mapping = MemoryMapping::new_identity();
+            }
         }
         EbpfVm {
             host_stack_pointer: std::ptr::null_mut(),
@@ -356,6 +365,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             #[cfg(feature = "debugger")]
             debug_metadata: None,
             register_trace: Vec::default(),
+            memory_mapping: current_mapping,
         }
     }
 
@@ -457,11 +467,14 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
     pub fn load<T: Pod + Into<u64>>(&mut self, vm_addr: u64) -> ProgramResult {
         let len = mem::size_of::<T>() as u64;
         debug_assert!(len <= mem::size_of::<u64>() as u64);
-        match self.context_object_pointer.get_mut_mapping().map_with_access_violation_handler(AccessType::Load, vm_addr, len) {
-            ProgramResult::Ok(host_addr) => {
-                ProgramResult::Ok(unsafe { ptr::read_unaligned::<T>(host_addr as *const T) }.into())
+
+        unsafe {
+            match (*self.memory_mapping).map_with_access_violation_handler(AccessType::Load, vm_addr, len) {
+                ProgramResult::Ok(host_addr) => {
+                    ProgramResult::Ok(ptr::read_unaligned::<T>(host_addr as *const T).into())
+                }
+                err => err,
             }
-            err => err,
         }
     }
 
@@ -470,12 +483,15 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
     pub fn store<T: Pod>(&mut self, value: T, vm_addr: u64) -> ProgramResult {
         let len = mem::size_of::<T>() as u64;
         debug_assert!(len <= mem::size_of::<u64>() as u64);
-        match self.context_object_pointer.get_mut_mapping().map_with_access_violation_handler(AccessType::Store, vm_addr, len) {
-            ProgramResult::Ok(host_addr) => {
-                unsafe { ptr::write_unaligned(host_addr as *mut T, value) };
-                ProgramResult::Ok(host_addr)
+
+        unsafe {
+            match (*self.memory_mapping).map_with_access_violation_handler(AccessType::Store, vm_addr, len) {
+                ProgramResult::Ok(host_addr) => {
+                    ptr::write_unaligned(host_addr as *mut T, value);
+                    ProgramResult::Ok(host_addr)
+                }
+                err => err,
             }
-            err => err,
         }
     }
 }
