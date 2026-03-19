@@ -1654,7 +1654,7 @@ impl<'a, C: ContextObject> JitCompiler<'a, C> {
                     Argument { index: 3, value: Value::Register(REGISTER_SCRATCH) }, // Specify first as the src register could be overwritten by other arguments
                     Argument { index: 2, value: Value::RegisterIndirect(RSP, -8, false) },
                     Argument { index: 4, value: Value::Constant64(0, false) }, // self.pc is set later
-                    Argument { index: 1, value: Value::Regisster(REGISTER_PTR_TO_VM) },
+                    Argument { index: 1, value: Value::Register(REGISTER_PTR_TO_VM) },
                     Argument { index: 0, value: Value::RegisterPlusConstant32(REGISTER_PTR_TO_VM, self.slot_in_vm(RuntimeEnvironmentSlot::ProgramResult), false) },
                 ], None);
             }
