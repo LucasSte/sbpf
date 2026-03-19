@@ -1624,7 +1624,6 @@ impl<'a, C: ContextObject> JitCompiler<'a, C> {
             // skip over the pc slot pushed by the caller, we'll pop it before returning
             self.emit_ins(X86Instruction::alu_immediate(OperandSize::S64, 0x81, 5, RSP, 8, None)); // RSP -= 8
             // call EbpfVm::(load|store) storing the result in RuntimeEnvironmentSlot::ProgramResult
-            self.emit_ins(X86Instruction::load())
             if *anchor_base == 0 { // AccessType::Load
                 let load = match len {
                     1 => MemoryMapping::load::<u8> as *const u8 as i64,
