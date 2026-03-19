@@ -309,6 +309,7 @@ macro_rules! test_interpreter_and_jit {
             const INSTRUCTION_METER_BUDGET: u64 = 1024;
             context_object.remaining = INSTRUCTION_METER_BUDGET;
         }
+        let original_budget = context_object.remaining;
         $executable.verify::<RequisiteVerifier>().unwrap();
         let (instruction_count_interpreter, result_interpreter, interpreter_final_pc, _trace_interpreter) = {
             let mut mem = $mem;
@@ -336,7 +337,7 @@ macro_rules! test_interpreter_and_jit {
         };
         #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
         {
-            context_object.set_remaining(0);
+            context_object.set_remaining(original_budget);
             #[allow(unused_mut)]
             let compilation_result = $executable.jit_compile();
             let mut mem = $mem;
