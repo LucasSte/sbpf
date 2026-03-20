@@ -22,11 +22,7 @@
 //! respect this convention.
 
 use crate::TestContextObject;
-use solana_sbpf::{
-    declare_builtin_function,
-    error::EbpfError,
-    memory_region::{AccessType},
-};
+use solana_sbpf::{declare_builtin_function, error::EbpfError, memory_region::AccessType};
 use std::{slice::from_raw_parts, str::from_utf8};
 
 declare_builtin_function!(

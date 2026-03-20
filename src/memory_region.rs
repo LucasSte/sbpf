@@ -1,5 +1,6 @@
 //! This module defines memory regions
 
+use crate::aligned_memory::Pod;
 use crate::{
     ebpf,
     error::{EbpfError, ProgramResult},
@@ -7,7 +8,6 @@ use crate::{
     vm::Config,
 };
 use std::{array, cell::UnsafeCell, fmt, mem, ops::Range, ptr};
-use crate::aligned_memory::Pod;
 /* Explanation of the Gapped Memory
 
     The MemoryMapping supports a special mapping mode which is used for the stack MemoryRegion.
@@ -291,25 +291,34 @@ impl<'a> UnalignedMemoryMapping {
 
     /// Creates a new MemoryMapping structure from the given regions
     pub fn new_with_access_violation_handler(
-        mut regions: Vec<MemoryRegion>,
+        regions: Vec<MemoryRegion>,
         config: &'a Config,
         sbpf_version: SBPFVersion,
         access_violation_handler: AccessViolationHandler,
     ) -> Result<Self, EbpfError> {
+        let mut result = Self::new_uninitialized_with_access_violation_handler(
+            regions,
+            config,
+            sbpf_version,
+            access_violation_handler,
+        );
+        result.initialize()?;
+        Ok(result)
+    }
+
+    /// Create an uninitialized Mapping
+    pub fn new_uninitialized_with_access_violation_handler(
+        regions: Vec<MemoryRegion>,
+        config: &'a Config,
+        sbpf_version: SBPFVersion,
+        access_violation_handler: AccessViolationHandler,
+    ) -> Self {
         debug_assert!(
             sbpf_version <= SBPFVersion::V3,
             "SBPFv4 and later versions do not support unaligned memory"
         );
-        regions.sort();
         let number_of_regions = regions.len();
-        for index in 1..number_of_regions {
-            let first = &regions[index.saturating_sub(1)];
-            let second = &regions[index];
-            if first.vm_addr_range().end > second.vm_addr {
-                return Err(EbpfError::InvalidMemoryRegion(index));
-            }
-        }
-        let mut result = Self {
+        Self {
             common: CommonMemoryMapping {
                 regions: regions.into_boxed_slice(),
                 access_violation_handler,
@@ -321,9 +330,22 @@ impl<'a> UnalignedMemoryMapping {
             region_addresses: vec![0; number_of_regions].into_boxed_slice(),
             region_index_lookup: vec![0; number_of_regions].into_boxed_slice(),
             cache: UnsafeCell::new(MappingCache::new()),
-        };
-        result.construct_eytzinger_order(0, 0);
-        Ok(result)
+        }
+    }
+
+    /// Initialize unaligned memory mapping
+    pub fn initialize(&mut self) -> Result<(), EbpfError> {
+        self.common.regions.sort();
+        let number_of_regions = self.common.regions.len();
+        for index in 1..number_of_regions {
+            let first = &self.common.regions[index.saturating_sub(1)];
+            let second = &self.common.regions[index];
+            if first.vm_addr_range().end > second.vm_addr {
+                return Err(EbpfError::InvalidMemoryRegion(index));
+            }
+        }
+        self.construct_eytzinger_order(0, 0);
+        Ok(())
     }
 
     /// Returns the `MemoryRegion` which may contain the given address.
@@ -494,11 +516,6 @@ impl AlignedMemoryMapping {
         self.common.regions[index] = region;
         Ok(())
     }
-
-    /// Stop the memory mapping and offload the regions
-    pub fn stop_mapping(&mut self) -> Box<[MemoryRegion]> {
-        std::mem::take(&mut self.common.regions)
-    }
 }
 
 /// Maps virtual memory to host memory.
@@ -653,6 +670,15 @@ impl MemoryMapping {
         }
     }
 
+    /// Returns the `MemoryRegion`s in this mapping as mutable
+    pub fn get_regions_mut(&mut self) -> Option<&mut Box<[MemoryRegion]>> {
+        match self {
+            MemoryMapping::Identity => None,
+            MemoryMapping::Aligned(m) => Some(&mut m.common.regions),
+            MemoryMapping::Unaligned(m) => Some(&mut m.common.regions),
+        }
+    }
+
     /// Replaces the `MemoryRegion` at the given index
     #[inline(always)]
     pub fn replace_region(&mut self, index: usize, region: MemoryRegion) -> Result<(), EbpfError> {
@@ -671,16 +697,6 @@ impl MemoryMapping {
             MemoryMapping::Aligned(m) => m.replace_region(index, region),
             MemoryMapping::Unaligned(m) => m.replace_region(index, region),
         }
-    }
-
-    /// Stop the memory mapping and offload the regions
-    /// Only allowed for alined mappings
-    pub fn stop_mapping(&mut self) -> Option<Box<[MemoryRegion]>> {
-        if let MemoryMapping::Aligned(aligned_memory) = self {
-            return Some(aligned_memory.stop_mapping());
-        }
-
-        None
     }
 
     /// Loads `size_of::<T>()` bytes from the given address.
@@ -704,11 +720,22 @@ impl MemoryMapping {
 
         match self.map_with_access_violation_handler(AccessType::Store, vm_addr, len) {
             ProgramResult::Ok(host_addr) => {
-                unsafe { ptr::write_unaligned(host_addr as *mut T, value); }
+                unsafe {
+                    ptr::write_unaligned(host_addr as *mut T, value);
+                }
                 ProgramResult::Ok(host_addr)
             }
             err => err,
         }
+    }
+
+    /// Initialize mapping
+    pub fn initialize(&mut self) -> Result<(), EbpfError> {
+        if let MemoryMapping::Unaligned(m) = self {
+            return m.initialize();
+        }
+
+        Ok(())
     }
 }
 
@@ -767,9 +794,9 @@ impl MappingCache {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use std::{cell::RefCell, rc::Rc};
     use test_utils::assert_error;
-    use super::*;
 
     #[test]
     fn test_mapping_cache() {
@@ -861,7 +888,7 @@ mod test {
                 SBPFVersion::V3,
             )
             .unwrap();
-            
+
             for frame in 0..4 {
                 let address = ebpf::MM_STACK_START + frame * 4;
                 {
@@ -1110,7 +1137,7 @@ mod test {
             SBPFVersion::V3,
         )
         .unwrap();
-        
+
         m.store(0x1122u16, ebpf::MM_REGION_SIZE).unwrap();
         assert_eq!(m.load::<u16>(ebpf::MM_REGION_SIZE).unwrap(), 0x1122);
 
@@ -1134,7 +1161,7 @@ mod test {
             SBPFVersion::V3,
         )
         .unwrap();
-        
+
         m.store(0x11u8, ebpf::MM_REGION_SIZE).unwrap();
         assert_error!(m.store(0x11u8, ebpf::MM_REGION_SIZE - 1), "AccessViolation");
         assert_error!(m.store(0x11u8, ebpf::MM_REGION_SIZE + 1), "AccessViolation");

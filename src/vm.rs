@@ -21,12 +21,11 @@ use crate::{
     program::{BuiltinFunction, BuiltinProgram, FunctionRegistry, SBPFVersion},
     static_analysis::{Analysis, DummyContextObject, RegisterTraceEntry},
 };
-use std::{collections::BTreeMap, fmt::Debug, marker::PhantomData, mem::offset_of};
-
 #[cfg(feature = "shuttle-test")]
 use shuttle::sync::Arc;
 #[cfg(not(feature = "shuttle-test"))]
 use std::sync::Arc;
+use std::{collections::BTreeMap, fmt::Debug, marker::PhantomData, mem::offset_of};
 
 #[cfg(all(feature = "jit", not(feature = "shuttle-test")))]
 use rand::{thread_rng, Rng};
@@ -150,8 +149,6 @@ pub trait ContextObject {
     fn consume(&mut self, amount: u64);
     /// Get the number of remaining instructions allowed
     fn get_remaining(&self) -> u64;
-    /// Return a pointer to the memory mapping to be used in this program
-    fn get_mapping_pointer(&mut self) -> *mut MemoryMapping;
 }
 
 /// Statistic of taken branches (from a recorded trace)
@@ -274,7 +271,8 @@ pub enum RuntimeEnvironmentSlot {
 /// let memory_mapping = MemoryMapping::new(regions, executable.get_config(), sbpf_version).unwrap();
 /// context_object.set_mapping(memory_mapping);
 ///
-/// let mut vm = EbpfVm::new(loader, sbpf_version, &mut context_object, stack_len);
+/// let mapping_ptr = &raw mut context_object.memory_mapping;
+/// let mut vm = EbpfVm::new(loader, sbpf_version, &mut context_object, stack_len, mapping_ptr);
 ///
 /// let (instruction_count, result) = vm.execute_program(
 ///     &executable,
@@ -324,11 +322,13 @@ pub struct EbpfVm<'a, C: ContextObject> {
 
 impl<'a, C: ContextObject> EbpfVm<'a, C> {
     /// Creates a new virtual machine instance.
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn new(
         loader: Arc<BuiltinProgram<C>>,
         sbpf_version: SBPFVersion,
         context_object: &'a mut C,
         stack_len: usize,
+        memory_mapping: *mut MemoryMapping,
     ) -> Self {
         let config = loader.get_config();
         let mut registers = [0u64; 12];
@@ -339,11 +339,9 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 stack_len
             } as u64);
 
-        let current_mapping = context_object.get_mapping_pointer();
-
         if !config.enable_address_translation {
             unsafe {
-                *current_mapping = MemoryMapping::new_identity();
+                *memory_mapping = MemoryMapping::new_identity();
             }
         }
         EbpfVm {
@@ -365,7 +363,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             #[cfg(feature = "debugger")]
             debug_metadata: None,
             register_trace: Vec::default(),
-            memory_mapping: current_mapping,
+            memory_mapping,
         }
     }
 
