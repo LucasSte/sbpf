@@ -702,3 +702,15 @@ fn test_long_section_name() {
         SECTION_NAME_LENGTH_MAXIMUM
     );
 }
+
+#[test]
+fn brake_elf() {
+    let elf_bytes = std::fs::read("tests/elfs/broken_elf.so").unwrap();
+    let loader = BuiltinProgram::new_loader(Config::default());
+    let loaded = ElfExecutable::load(&elf_bytes, Arc::new(loader));
+
+    std::println!("response: {:?}", loaded);
+
+    let unwrapped = loaded.unwrap();
+    let ro_section = unwrapped.get_ro_region();
+}
